@@ -307,115 +307,128 @@ with tab4:
 
 
 # ---------- AI Copy Tab (≤250 chars) ----------
-# ---------- AI Audience Summary Tab (1–2 paragraphs) ----------
+# ---------- AI Audience (Continents) ----------
 with tab5:
-    st.header("AI Audience Summary")
+    st.header("AI Audience Summary — Continents")
 
     df = load_data()
     if df.empty:
         st.info("No data yet. Submit responses first.")
     else:
-        # Prepare country counts
-        counts = (
-            df.groupby(["country_name"], as_index=False)
-              .size()
-              .rename(columns={"size": "count"})
-              .sort_values("count", ascending=False)
+        # Build continent counts
+        dfc = df.copy()
+        dfc["continent"] = dfc["alpha3"].apply(alpha3_to_continent)
+
+        cont = (
+            dfc.groupby("continent", as_index=False)
+               .size()
+               .rename(columns={"size":"count"})
+               .sort_values("count", ascending=False)
         )
-        total = int(df.shape[0])
-        unique = int(counts.shape[0])
-        top_list = counts.head(5).to_dict(orient="records")
 
-        # Simple diversity proxy (inverse Herfindahl)
-        import math
-        p = (counts["count"] / total) if total else pd.Series(dtype=float)
-        hhi = float((p**2).sum()) if total else 0.0
-        diversity = (1 / hhi) if hhi > 0 else 0.0
-        if diversity >= 8:
-            diversity_tag = "high diversity"
-        elif diversity >= 4:
-            diversity_tag = "moderate diversity"
+        # Drop unknowns from the headline, but keep for totals
+        known = cont[cont["continent"] != "Other/Unknown"].copy()
+        total = int(len(dfc))
+        known_total = int(known["count"].sum())
+        unique_conts = int(known.shape[0])
+
+        # Shares
+        if known_total > 0:
+            known["share"] = known["count"] / known_total
         else:
-            diversity_tag = "low diversity"
+            known["share"] = 0.0
 
-        # Recent uptick (last 10 vs. previous 10)
+        # Diversity (across continents): inverse HHI
+        import math
+        p = known["share"]
+        hhi = float((p**2).sum()) if known_total else 0.0
+        diversity = (1/hhi) if hhi > 0 else 0.0
+        if diversity >= 5:
+            diversity_tag = "broadly balanced across continents"
+        elif diversity >= 3:
+            diversity_tag = "moderately balanced"
+        else:
+            diversity_tag = "skewed toward a few regions"
+
+        # Recent uptick by continent (last 10 vs previous 10)
         uptick = ""
-        if len(df) >= 20:
-            last10 = df.tail(10).country_name.value_counts()
-            prev10 = df.tail(20).head(10).country_name.value_counts()
-            gaining = (last10 - prev10).sort_values(ascending=False)
-            gaining = [c for c, v in gaining.items() if v > 0]
-            if gaining:
-                uptick = ", ".join(gaining[:3])
+        if len(dfc) >= 20:
+            last10 = dfc.tail(10)["continent"].value_counts()
+            prev10 = dfc.tail(20).head(10)["continent"].value_counts()
+            gain = (last10 - prev10).sort_values(ascending=False)
+            gain = [c for c, v in gain.items() if v > 0 and c != "Other/Unknown"]
+            if gain:
+                uptick = ", ".join(gain[:3])
 
         # Controls
-        col1, col2 = st.columns([1,1])
-        with col1:
+        c1, c2 = st.columns(2)
+        with c1:
             tone = st.selectbox("Tone", ["Professional", "Friendly", "Energetic", "Neutral"], index=0)
-        with col2:
+        with c2:
             paragraphs = st.radio("Length", ["1 paragraph", "2 paragraphs"], index=1)
 
-        # Build factual context for the model
+        # Facts for the model / fallback
         breakdown = ", ".join(
-            f"{r['country_name']} ({int(r['count'])}, {int(round(r['count']*100/total))}%)"
-            for r in top_list
-        ) if total else "—"
+            f"{row.continent} ({int(row['count'])}, {row['share']:.0%})"
+            for _, row in known.head(6).iterrows()
+        ) if known_total else "—"
 
         context = {
-            "total_responses": total,
-            "unique_countries": unique,
-            "top_breakdown": breakdown,
+            "total": total,
+            "known_total": known_total,
+            "unique_conts": unique_conts,
+            "breakdown": breakdown,
             "diversity": diversity_tag,
-            "recent_uptick": uptick or None,
+            "unknowns": int(cont.loc[cont["continent"]=="Other/Unknown","count"].sum()) if "Other/Unknown" in cont["continent"].values else 0,
+            "uptick": uptick or None,
         }
 
+        # Local fallback summary (1–2 short paragraphs)
         def local_summary():
-            # Local fallback: 1–2 short paragraphs, no external API
-            top_name = counts.iloc[0]["country_name"] if not counts.empty else "—"
-            top_share = (counts.iloc[0]["count"] / total) if total else 0
+            lead = "We’re seeing responses from multiple continents" if context["unique_conts"] > 1 else "Responses currently cluster in a single region"
             p1 = (
-                f"We’ve gathered {total} responses across {unique} countries. "
-                f"{top_name} currently leads with {top_share:.0%} of the sample. "
-                f"Top countries so far: {breakdown}. Overall reach shows {diversity_tag}."
+                f"{lead}. So far we have {context['total']} submissions "
+                f"({context['known_total']} mapped to continents). "
+                f"Top representation: {context['breakdown']}. Overall mix looks {context['diversity']}."
             )
             p2 = ""
             if paragraphs == "2 paragraphs":
-                if context["recent_uptick"]:
-                    p2 = f"Recent momentum appears from {context['recent_uptick']}. We’ll keep tracking as new responses arrive."
+                if context["uptick"]:
+                    p2 = f"Recent momentum is strongest in {context['uptick']}. We’ll keep tracking how the regional picture evolves as more responses arrive."
                 else:
-                    p2 = "We’ll keep tracking how the mix evolves as more participants join."
+                    p2 = "We’ll keep tracking how the regional picture evolves as more responses arrive."
             return p1 if not p2 else p1 + "\n\n" + p2
 
-        # Generate with OpenAI when available
-        generate = st.button("Generate summary")
+        # Generate with OpenAI if available
+        generate = st.button("Generate continent insights")
         summary = ""
 
         if generate:
-            use_openai = bool(os.getenv("OPENAI_API_KEY"))
-            if use_openai:
+            if os.getenv("OPENAI_API_KEY"):
                 try:
                     from openai import OpenAI
                     client = OpenAI()
-
-                    length_req = "one paragraph" if paragraphs == "1 paragraph" else "two short paragraphs"
+                    length_req = "one short paragraph (~80 words)" if paragraphs == "1 paragraph" else "two short paragraphs (100–160 words total)"
                     prompt = (
-                        "Write {length_req} (≈80–160 words total) summarizing audience origins for a LinkedIn update. "
-                        "Be factual, concise, and positive. No emojis, no hashtags, no URLs. "
-                        "Mention total responses, top countries, and overall diversity; optionally note any recent uptick.\n\n"
-                        "Facts (use as ground truth):\n"
-                        f"- Total responses: {context['total_responses']}\n"
-                        f"- Unique countries: {context['unique_countries']}\n"
-                        f"- Top countries: {context['top_breakdown']}\n"
-                        f"- Diversity: {context['diversity']}\n"
-                        f"- Recent uptick: {context['recent_uptick']}\n"
-                        f"- Tone: {tone}\n"
-                    ).format(length_req=length_req)
+                        "Write {length_req} summarizing continent representation in a live survey. "
+                        "Be {tone}, factual, and concise. No emojis, no hashtags, no URLs. "
+                        "Mention total responses, leading continents with shares, overall balance, "
+                        "and any recent uptick by region.\n\n"
+                        "Facts (ground truth):\n"
+                        f"- Total responses: {context['total']}\n"
+                        f"- Mapped to continents: {context['known_total']}\n"
+                        f"- Unique continents: {context['unique_conts']}\n"
+                        f"- Breakdown (top): {context['breakdown']}\n"
+                        f"- Mix: {context['diversity']}\n"
+                        f"- Unknown/Other: {context['unknowns']}\n"
+                        f"- Recent uptick: {context['uptick']}\n"
+                    ).format(length_req=length_req, tone=tone.lower())
 
                     resp = client.chat.completions.create(
                         model="gpt-4o-mini",
-                        messages=[{"role": "user", "content": prompt}],
+                        messages=[{"role":"user","content":prompt}],
                         temperature=0.7,
-                        max_tokens=400,
+                        max_tokens=500,
                     )
                     summary = resp.choices[0].message.content.strip()
                 except Exception as e:
@@ -425,17 +438,17 @@ with tab5:
                 st.info("OPENAI_API_KEY not set — using local summary.")
                 summary = local_summary()
 
-        # Show result
         if summary:
-            st.subheader("Audience summary")
+            st.subheader("Continent insights")
             st.markdown(summary)
             st.download_button(
                 "Download summary (.txt)",
                 data=summary.encode("utf-8"),
-                file_name="audience_summary.txt",
+                file_name="continent_insights.txt",
                 mime="text/plain",
                 use_container_width=True,
             )
+
 
 
 
