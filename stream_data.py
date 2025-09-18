@@ -11,6 +11,40 @@ from wordcloud import WordCloud
 import pycountry
 import os
 
+# --- Country → Continent helper (put this near imports) ---
+try:
+    import country_converter as coco
+    _cc = coco.CountryConverter()
+except Exception:
+    _cc = None  # fallback if the package isn't installed
+
+# optional minimal fallback for common ISO3 codes (extend as needed)
+_CONTINENT_BY_ALPHA3 = {
+    "USA":"North America","CAN":"North America","MEX":"North America",
+    "BRA":"South America","ARG":"South America","COL":"South America",
+    "DEU":"Europe","FRA":"Europe","ESP":"Europe","ITA":"Europe","GBR":"Europe","NLD":"Europe","BEL":"Europe",
+    "SWE":"Europe","NOR":"Europe","POL":"Europe","PRT":"Europe",
+    "CHN":"Asia","IND":"Asia","JPN":"Asia","KOR":"Asia","SGP":"Asia","IDN":"Asia","THA":"Asia","VNM":"Asia","PAK":"Asia",
+    "AUS":"Oceania","NZL":"Oceania",
+    "ZAF":"Africa","EGY":"Africa","NGA":"Africa","KEN":"Africa","ETH":"Africa","MAR":"Africa","GHA":"Africa",
+}
+
+def alpha3_to_continent(alpha3: str) -> str:
+    """Return continent name ('Europe', 'Asia', etc.) for an ISO3 code."""
+    if not isinstance(alpha3, str):
+        return "Other/Unknown"
+    a3 = alpha3.upper().strip()
+    if _cc:
+        try:
+            cont = _cc.convert(names=a3, src="ISO3", to="continent")
+            if isinstance(cont, list):
+                cont = cont[0]
+            if cont and cont != "not found":
+                return cont
+        except Exception:
+            pass
+    return _CONTINENT_BY_ALPHA3.get(a3, "Other/Unknown")
+
 DB_PATH = os.getenv("DB_PATH", "countries.db")
 
 # ---------- Setup ----------
@@ -303,10 +337,6 @@ with tab4:
             "Interpret as insights about *this sample*, not the entire population."
         )
 
-# ---------- AI Copy Tab (≤250 chars) ----------
-
-
-# ---------- AI Copy Tab (≤250 chars) ----------
 # ---------- AI Audience (Continents) ----------
 with tab5:
     st.header("AI Audience Summary — Continents")
@@ -317,7 +347,10 @@ with tab5:
     else:
         # Build continent counts
         dfc = df.copy()
-        dfc["continent"] = dfc["alpha3"].apply(alpha3_to_continent)
+        dfc["continent"] = dfc["alpha3"].fillna("").apply(alpha3_to_continent)
+
+        # dfc = df.copy()
+        # dfc["continent"] = dfc["alpha3"].apply(alpha3_to_continent)
 
         cont = (
             dfc.groupby("continent", as_index=False)
