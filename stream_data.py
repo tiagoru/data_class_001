@@ -106,7 +106,7 @@ with tab3:
         )
 
         st.subheader("Bar chart (Top 20)")
-        topn = st.slider("How many countries to show", 5, min(50, len(counts)), min(20, len(counts)))
+        topn = st.slider("How many countries to show", 5, min(50, len(counts)), min(1, len(counts)))
         bar = px.bar(
             counts.head(topn),
             x="country_name",
