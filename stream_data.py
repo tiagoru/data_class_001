@@ -101,7 +101,6 @@ with tab3:
     if df.empty:
         st.info("No data to visualize yet.")
     else:
-        # Prepare counts (keep ISO3 for the map)
         counts = (
             df.groupby(["country_name", "alpha3"], as_index=False)
               .size()
@@ -132,21 +131,22 @@ with tab3:
         bar_fig.update_layout(xaxis_tickangle=-35, margin=dict(l=10, r=10, t=10, b=10), height=420)
         st.plotly_chart(bar_fig, use_container_width=True)
 
-        # --- Two-up layout: Word cloud + quick table (optional) ---
+        # --- Word cloud + quick table ---
         left, right = st.columns([2, 1])
 
         with left:
             st.subheader("Word cloud")
-            # Build frequency dict for the cloud
             freq = {row["country_name"]: int(row["count"]) for _, row in counts.iterrows()}
             if sum(freq.values()) == 0:
                 st.info("Not enough data for a word cloud yet.")
             else:
+                from wordcloud import WordCloud
+                import io
                 wc = WordCloud(width=1200, height=600, background_color="white")
                 wc_img = wc.generate_from_frequencies(freq)
                 buf = io.BytesIO()
                 wc_img.to_image().save(buf, format="PNG")
-                st.image(buf.getvalue(), caption="Country frequency word cloud", use_container_width=True)
+                st.image(buf.getvalue(), caption="Country frequency word cloud", use_column_width=True)
 
         with right:
             st.subheader("Top countries")
@@ -160,7 +160,7 @@ with tab3:
         st.subheader("World map")
         map_fig = px.choropleth(
             counts,
-            locations="alpha3",                 # ISO3 codes
+            locations="alpha3",
             color="count",
             hover_name="country_name",
             color_continuous_scale="Viridis",
@@ -169,9 +169,6 @@ with tab3:
         map_fig.update_layout(margin=dict(l=10, r=10, t=10, b=10), height=520)
         st.plotly_chart(map_fig, use_container_width=True)
 
-
-
-# ---------- Insights Tab ----------
 # ---------- Insights Tab (statistical) ----------
 with tab4:
     st.header("Statistical Insights (no external AI)")
