@@ -274,11 +274,13 @@ with tab4:
         )
 
 # ---------- AI Copy Tab (≤250 chars) ----------
-with tab5:
-    st.header(""🤖 AI Copy (≤250 chars)")
-#tab5, = st.tabs(["🤖 AI Copy (≤250 chars)"])
+# --- put near your other imports ---
+import os
 
-    with tab5:
+# ---------- AI Copy Tab (≤250 chars) ----------
+tab5, = st.tabs(["🤖 AI Copy (≤250 chars)"])
+
+with tab5:
     st.header("AI-style social snippets (≤250 chars)")
     df = load_data()
 
@@ -297,7 +299,7 @@ with tab5:
         top_share = (top["count"] / total) if top is not None else 0.0
 
         # UI options
-        c1, c2, c3 = st.columns([1,1,1])
+        c1, c2, c3 = st.columns([1, 1, 1])
         with c1:
             add_emojis = st.checkbox("Add emojis", value=True)
         with c2:
@@ -314,23 +316,24 @@ with tab5:
         )
 
         # ---------- Local heuristic generator (no external API) ----------
-        def local_variants(k: int) -> list[str]:
+        def local_variants(k):
             base_bits = []
-            if add_emojis: base_bits.append("🌍")
-            msg1 = f"{' '.join(base_bits)} From our sample of {total}, {top_name} leads at {top_share:.0%}."
-            msg2 = f"{' '.join(base_bits)} Most respondents are from {top_name}; results keep rolling in."
-            msg3 = f"{' '.join(base_bits)} Snapshot: {top_name} tops the list; more countries represented soon."
+            if add_emojis:
+                base_bits.append("🌍")
+            prefix = " ".join(base_bits)
+            msg1 = f"{prefix} From our sample of {total}, {top_name} leads at {top_share:.0%}."
+            msg2 = f"{prefix} Most respondents are from {top_name}; results keep rolling in."
+            msg3 = f"{prefix} Snapshot: {top_name} tops the list; more countries represented soon."
             pool = [msg1, msg2, msg3]
 
             # Expand if more needed
             while len(pool) < k:
                 i = len(pool) + 1
-                pool.append(f"{' '.join(base_bits)} Update #{i}: {top_name} still ahead; {total} responses so far.")
+                pool.append(f"{prefix} Update #{i}: {top_name} still ahead; {total} responses so far.")
 
             def decorate(s: str) -> str:
                 tags = " #survey #community" if add_hashtags else ""
                 out = (s + tags).strip()
-                # Hard cap at 250 characters
                 return (out[:247] + "…") if len(out) > 250 else out
 
             return [decorate(x) for x in pool[:k]]
@@ -345,8 +348,10 @@ with tab5:
                 client = OpenAI()  # uses OPENAI_API_KEY from env
                 style = "energetic, clear, suitable for social media, no URLs."
                 extras = []
-                if add_emojis: extras.append("tasteful emojis allowed")
-                if add_hashtags: extras.append("1–2 short hashtags allowed")
+                if add_emojis:
+                    extras.append("tasteful emojis allowed")
+                if add_hashtags:
+                    extras.append("1–2 short hashtags allowed")
                 extras = ", ".join(extras) if extras else "no emojis or hashtags"
 
                 prompt = (
@@ -362,24 +367,24 @@ with tab5:
                     model="gpt-4o-mini",
                     messages=[{"role": "user", "content": prompt}],
                     temperature=0.7,
-                    max_tokens=220
+                    max_tokens=220,
                 )
                 raw = resp.choices[0].message.content.strip().split("\n")
-                # Clean, cap to 250 chars
                 for line in raw:
                     txt = line.strip("•- \t")
                     if not add_hashtags:
-                        # remove heavy hashtag spam if any
                         parts = [w for w in txt.split() if not (w.startswith("#") and len(w) > 15)]
                         txt = " ".join(parts)
                     txt = (txt[:247] + "…") if len(txt) > 250 else txt
                     if txt:
                         ai_texts.append(txt)
-                # Ensure we have exactly n_variants
+
+                # Ensure exactly n_variants
                 if len(ai_texts) < n_variants:
                     ai_texts += local_variants(n_variants - len(ai_texts))
                 else:
                     ai_texts = ai_texts[:n_variants]
+
             except Exception as e:
                 st.warning(f"OpenAI generation failed: {e}. Falling back to local.")
                 ai_texts = local_variants(n_variants)
@@ -388,7 +393,7 @@ with tab5:
 
         st.subheader("Your snippets")
         for i, t in enumerate(ai_texts, 1):
-            st.code(t, language=None)  # shows a handy copy button
+            st.code(t, language=None)  # handy copy button
 
         # Download all as a text file
         all_txt = "\n\n".join(ai_texts)
@@ -397,8 +402,9 @@ with tab5:
             data=all_txt.encode("utf-8"),
             file_name="ai_snippets.txt",
             mime="text/plain",
-            use_container_width=True
+            use_container_width=True,
         )
 
         st.caption("Tip: toggle OpenAI for punchier copy. Without a key, the app uses a local generator.")
+
 
