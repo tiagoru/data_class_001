@@ -97,9 +97,11 @@ with tab2:
 with tab3:
     st.header("Charts & Map")
     df = load_data()
+
     if df.empty:
         st.info("No data to visualize yet.")
     else:
+        # Prepare counts (keep ISO3 for the map)
         counts = (
             df.groupby(["country_name", "alpha3"], as_index=False)
               .size()
@@ -107,6 +109,7 @@ with tab3:
               .sort_values("count", ascending=False)
         )
 
+        # --- Bar chart (Top N) ---
         st.subheader("Bar chart (Top N)")
         n = len(counts)
         max_n = max(1, min(50, n))
@@ -114,16 +117,58 @@ with tab3:
         if n <= 1:
             topn = n
         else:
-            topn = st.slider("How many countries to show",
-                             min_value=1, max_value=max_n, value=default_n, step=1)
-        bar = px.bar(
+            topn = st.slider(
+                "How many countries to show",
+                min_value=1, max_value=max_n, value=default_n, step=1
+            )
+
+        bar_fig = px.bar(
             counts.head(topn),
-            x="country_name", y="count",
+            x="country_name",
+            y="count",
             labels={"country_name": "Country", "count": "Responses"},
             title=None
         )
-        bar.update_layout(xaxis_tickangle=-35, margin=dict(l=10, r=10, t=10, b=10), height=450)
-        st.plotly_chart(bar, use_container_width=True)
+        bar_fig.update_layout(xaxis_tickangle=-35, margin=dict(l=10, r=10, t=10, b=10), height=420)
+        st.plotly_chart(bar_fig, use_container_width=True)
+
+        # --- Two-up layout: Word cloud + quick table (optional) ---
+        left, right = st.columns([2, 1])
+
+        with left:
+            st.subheader("Word cloud")
+            # Build frequency dict for the cloud
+            freq = {row["country_name"]: int(row["count"]) for _, row in counts.iterrows()}
+            if sum(freq.values()) == 0:
+                st.info("Not enough data for a word cloud yet.")
+            else:
+                wc = WordCloud(width=1200, height=600, background_color="white")
+                wc_img = wc.generate_from_frequencies(freq)
+                buf = io.BytesIO()
+                wc_img.to_image().save(buf, format="PNG")
+                st.image(buf.getvalue(), caption="Country frequency word cloud", use_container_width=True)
+
+        with right:
+            st.subheader("Top countries")
+            st.dataframe(
+                counts[["country_name", "count"]].head(10).rename(columns={"country_name": "Country", "count": "Responses"}),
+                use_container_width=True,
+                height=320
+            )
+
+        # --- World map ---
+        st.subheader("World map")
+        map_fig = px.choropleth(
+            counts,
+            locations="alpha3",                 # ISO3 codes
+            color="count",
+            hover_name="country_name",
+            color_continuous_scale="Viridis",
+            projection="natural earth",
+        )
+        map_fig.update_layout(margin=dict(l=10, r=10, t=10, b=10), height=520)
+        st.plotly_chart(map_fig, use_container_width=True)
+
 
 
 # ---------- Insights Tab ----------
