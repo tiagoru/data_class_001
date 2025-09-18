@@ -93,6 +93,7 @@ with tab2:
             st.dataframe(counts, use_container_width=True)
 
 # ---------- Visualizations Tab ----------
+# ---------- Visualizations Tab ----------
 with tab3:
     st.header("Charts & Map")
     df = load_data()
@@ -106,38 +107,24 @@ with tab3:
               .sort_values("count", ascending=False)
         )
 
-        st.subheader("Bar chart (Top 20)")
-        topn = st.slider("How many countries to show", 5, min(50, len(counts)), min(1, len(counts)))
+        st.subheader("Bar chart (Top N)")
+        n = len(counts)
+        max_n = max(1, min(50, n))
+        default_n = min(20, max_n)
+        if n <= 1:
+            topn = n
+        else:
+            topn = st.slider("How many countries to show",
+                             min_value=1, max_value=max_n, value=default_n, step=1)
         bar = px.bar(
             counts.head(topn),
-            x="country_name",
-            y="count",
+            x="country_name", y="count",
             labels={"country_name": "Country", "count": "Responses"},
             title=None
         )
         bar.update_layout(xaxis_tickangle=-35, margin=dict(l=10, r=10, t=10, b=10), height=450)
         st.plotly_chart(bar, use_container_width=True)
 
-        st.subheader("Word cloud")
-        freq = {row["country_name"]: int(row["count"]) for _, row in counts.iterrows()}
-        wc = WordCloud(width=1200, height=600, background_color="white")
-        wc_img = wc.generate_from_frequencies(freq)
-        buf = io.BytesIO()
-        wc_img.to_image().save(buf, format="PNG")
-        st.image(buf.getvalue(), caption="Country frequency word cloud")
-
-        st.subheader("World map")
-        # plotly choropleth expects ISO-3 in 'locations'
-        map_fig = px.choropleth(
-            counts,
-            locations="alpha3",
-            color="count",
-            hover_name="country_name",
-            color_continuous_scale="Viridis",
-            projection="natural earth",
-        )
-        map_fig.update_layout(margin=dict(l=10, r=10, t=10, b=10), height=520)
-        st.plotly_chart(map_fig, use_container_width=True)
 
 # ---------- Insights Tab ----------
 # ---------- Insights Tab (statistical) ----------
@@ -278,8 +265,7 @@ with tab4:
 
 
 # ---------- AI Copy Tab (≤250 chars) ----------
-tab5, = st.tabs(["🤖 AI Copy (≤250 chars)"])
-
+# ---------- AI Copy Tab (≤250 chars) ----------
 with tab5:
     st.header("AI-style social snippets (≤250 chars)")
     df = load_data()
@@ -294,73 +280,52 @@ with tab5:
               .sort_values("count", ascending=False)
         )
         total = int(df.shape[0])
+
         top = counts.iloc[0] if not counts.empty else None
         top_name = top["country_name"] if top is not None else "—"
         top_share = (top["count"] / total) if top is not None else 0.0
 
-        # UI options
-        c1, c2, c3 = st.columns([1, 1, 1])
+        runner = counts.iloc[1] if len(counts) > 1 else None
+        runner_name = runner["country_name"] if runner is not None else None
+
+        c1, c2 = st.columns(2)
         with c1:
             add_emojis = st.checkbox("Add emojis", value=True)
         with c2:
             add_hashtags = st.checkbox("Add hashtags", value=False)
-        with c3:
-            n_variants = st.slider("Variants", 1, 5, 3)
 
-        # Context string for prompting or local fallback
-        context = (
-            f"Total responses: {total}. "
-            f"Top country: {top_name} ({top_share:.1%}). "
-            "Other notable: " +
-            ", ".join([f"{r.country_name} ({int(r['count'])})" for _, r in counts.head(5).iterrows()])
-        )
+        # Build a concise, news-style line (LOCAL fallback)
+        def local_news_blurb():
+            emoji = " 🌍" if add_emojis else ""
+            lead = f"{top_name} leads with {top_share:.0%}" if total > 0 else "New survey live"
+            tail = f", followed by {runner_name}" if runner_name else ""
+            base = f"Survey update{emoji}: {lead}{tail} — {total} responses so far."
+            if add_hashtags:
+                base += " #survey #community"
+            return (base[:247] + "…") if len(base) > 250 else base
 
-        # ---------- Local heuristic generator (no external API) ----------
-        def local_variants(k):
-            base_bits = []
-            if add_emojis:
-                base_bits.append("🌍")
-            prefix = " ".join(base_bits)
-            msg1 = f"{prefix} From our sample of {total}, {top_name} leads at {top_share:.0%}."
-            msg2 = f"{prefix} Most respondents are from {top_name}; results keep rolling in."
-            msg3 = f"{prefix} Snapshot: {top_name} tops the list; more countries represented soon."
-            pool = [msg1, msg2, msg3]
-
-            # Expand if more needed
-            while len(pool) < k:
-                i = len(pool) + 1
-                pool.append(f"{prefix} Update #{i}: {top_name} still ahead; {total} responses so far.")
-
-            def decorate(s: str) -> str:
-                tags = " #survey #community" if add_hashtags else ""
-                out = (s + tags).strip()
-                return (out[:247] + "…") if len(out) > 250 else out
-
-            return [decorate(x) for x in pool[:k]]
-
-        # ---------- Optional OpenAI generation ----------
         use_openai = st.toggle("Use OpenAI (set OPENAI_API_KEY)", value=False)
-        ai_texts = []
+        blurb = local_news_blurb()
 
         if use_openai and os.getenv("OPENAI_API_KEY"):
             try:
                 from openai import OpenAI
-                client = OpenAI()  # uses OPENAI_API_KEY from env
-                style = "energetic, clear, suitable for social media, no URLs."
+                client = OpenAI()
                 extras = []
-                if add_emojis:
-                    extras.append("tasteful emojis allowed")
-                if add_hashtags:
-                    extras.append("1–2 short hashtags allowed")
+                if add_emojis: extras.append("tasteful emojis allowed")
+                if add_hashtags: extras.append("add 1–2 short hashtags")
                 extras = ", ".join(extras) if extras else "no emojis or hashtags"
 
+                context = ", ".join(
+                    [f"{r.country_name} ({int(r['count'])})" for _, r in counts.head(5).iterrows()]
+                )
+
                 prompt = (
-                    "You generate SHORT social updates (<=250 characters). "
-                    "Write tight, positive, factual lines about survey results.\n"
-                    f"Context: {context}\n"
-                    f"Tone: {style}\n"
+                    "Write ONE short, news-style LinkedIn update (<=250 characters) about a live country survey. "
+                    "Be factual, energetic, and concise. No URLs.\n"
+                    f"Total: {total}. Top: {top_name} at {top_share:.0%}. Others: {context}.\n"
                     f"Extras: {extras}\n"
-                    f"Return {n_variants} distinct lines, each on its own line, no numbering."
+                    "Return ONLY the line—no bullets or numbering."
                 )
 
                 resp = client.chat.completions.create(
@@ -369,42 +334,29 @@ with tab5:
                     temperature=0.7,
                     max_tokens=220,
                 )
-                raw = resp.choices[0].message.content.strip().split("\n")
-                for line in raw:
-                    txt = line.strip("•- \t")
-                    if not add_hashtags:
-                        parts = [w for w in txt.split() if not (w.startswith("#") and len(w) > 15)]
-                        txt = " ".join(parts)
-                    txt = (txt[:247] + "…") if len(txt) > 250 else txt
-                    if txt:
-                        ai_texts.append(txt)
-
-                # Ensure exactly n_variants
-                if len(ai_texts) < n_variants:
-                    ai_texts += local_variants(n_variants - len(ai_texts))
-                else:
-                    ai_texts = ai_texts[:n_variants]
-
+                txt = resp.choices[0].message.content.strip()
+                if not add_hashtags:
+                    # Trim long hashtag spam, keep short ones
+                    parts = [w for w in txt.split() if not (w.startswith("#") and len(w) > 15)]
+                    txt = " ".join(parts)
+                txt = (txt[:247] + "…") if len(txt) > 250 else txt
+                if txt:
+                    blurb = txt
             except Exception as e:
-                st.warning(f"OpenAI generation failed: {e}. Falling back to local.")
-                ai_texts = local_variants(n_variants)
-        else:
-            ai_texts = local_variants(n_variants)
+                st.warning(f"OpenAI generation failed: {e}. Using local blurb.")
 
-        st.subheader("Your snippets")
-        for i, t in enumerate(ai_texts, 1):
-            st.code(t, language=None)  # handy copy button
+        st.subheader("LinkedIn-ready blurb")
+        st.code(blurb, language=None)
 
-        # Download all as a text file
-        all_txt = "\n\n".join(ai_texts)
         st.download_button(
-            "Download snippets (.txt)",
-            data=all_txt.encode("utf-8"),
-            file_name="ai_snippets.txt",
+            "Download blurb (.txt)",
+            data=blurb.encode("utf-8"),
+            file_name="linkedin_blurb.txt",
             mime="text/plain",
             use_container_width=True,
         )
 
-        st.caption("Tip: toggle OpenAI for punchier copy. Without a key, the app uses a local generator.")
+        st.caption("Tip: enable OpenAI for punchier copy. Without a key, the app uses a local news-style line.")
+
 
 
