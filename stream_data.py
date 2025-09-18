@@ -310,14 +310,15 @@ with tab4:
 
 
 # ---------- AI Copy Tab (≤250 chars) ----------
-# ---------- AI Copy Tab (≤250 chars) ----------
+# ---------- AI Audience Summary Tab (1–2 paragraphs) ----------
 with tab5:
-    st.header("AI-style social snippets (≤250 chars)")
-    df = load_data()
+    st.header("AI Audience Summary")
 
+    df = load_data()
     if df.empty:
         st.info("No data yet. Submit responses first.")
     else:
+        # Prepare country counts
         counts = (
             df.groupby(["country_name"], as_index=False)
               .size()
@@ -325,83 +326,120 @@ with tab5:
               .sort_values("count", ascending=False)
         )
         total = int(df.shape[0])
+        unique = int(counts.shape[0])
+        top_list = counts.head(5).to_dict(orient="records")
 
-        top = counts.iloc[0] if not counts.empty else None
-        top_name = top["country_name"] if top is not None else "—"
-        top_share = (top["count"] / total) if top is not None else 0.0
+        # Simple diversity proxy (inverse Herfindahl)
+        import math
+        p = (counts["count"] / total) if total else pd.Series(dtype=float)
+        hhi = float((p**2).sum()) if total else 0.0
+        diversity = (1 / hhi) if hhi > 0 else 0.0
+        if diversity >= 8:
+            diversity_tag = "high diversity"
+        elif diversity >= 4:
+            diversity_tag = "moderate diversity"
+        else:
+            diversity_tag = "low diversity"
 
-        runner = counts.iloc[1] if len(counts) > 1 else None
-        runner_name = runner["country_name"] if runner is not None else None
+        # Recent uptick (last 10 vs. previous 10)
+        uptick = ""
+        if len(df) >= 20:
+            last10 = df.tail(10).country_name.value_counts()
+            prev10 = df.tail(20).head(10).country_name.value_counts()
+            gaining = (last10 - prev10).sort_values(ascending=False)
+            gaining = [c for c, v in gaining.items() if v > 0]
+            if gaining:
+                uptick = ", ".join(gaining[:3])
 
-        c1, c2 = st.columns(2)
-        with c1:
-            add_emojis = st.checkbox("Add emojis", value=True)
-        with c2:
-            add_hashtags = st.checkbox("Add hashtags", value=False)
+        # Controls
+        col1, col2 = st.columns([1,1])
+        with col1:
+            tone = st.selectbox("Tone", ["Professional", "Friendly", "Energetic", "Neutral"], index=0)
+        with col2:
+            paragraphs = st.radio("Length", ["1 paragraph", "2 paragraphs"], index=1)
 
-        # Build a concise, news-style line (LOCAL fallback)
-        def local_news_blurb():
-            emoji = " 🌍" if add_emojis else ""
-            lead = f"{top_name} leads with {top_share:.0%}" if total > 0 else "New survey live"
-            tail = f", followed by {runner_name}" if runner_name else ""
-            base = f"Survey update{emoji}: {lead}{tail} — {total} responses so far."
-            if add_hashtags:
-                base += " #survey #community"
-            return (base[:247] + "…") if len(base) > 250 else base
+        # Build factual context for the model
+        breakdown = ", ".join(
+            f"{r['country_name']} ({int(r['count'])}, {int(round(r['count']*100/total))}%)"
+            for r in top_list
+        ) if total else "—"
 
-        use_openai = st.toggle("Use OpenAI (set OPENAI_API_KEY)", value=False)
-        blurb = local_news_blurb()
+        context = {
+            "total_responses": total,
+            "unique_countries": unique,
+            "top_breakdown": breakdown,
+            "diversity": diversity_tag,
+            "recent_uptick": uptick or None,
+        }
 
-        if use_openai and os.getenv("OPENAI_API_KEY"):
-            try:
-                from openai import OpenAI
-                client = OpenAI()
-                extras = []
-                if add_emojis: extras.append("tasteful emojis allowed")
-                if add_hashtags: extras.append("add 1–2 short hashtags")
-                extras = ", ".join(extras) if extras else "no emojis or hashtags"
+        def local_summary():
+            # Local fallback: 1–2 short paragraphs, no external API
+            top_name = counts.iloc[0]["country_name"] if not counts.empty else "—"
+            top_share = (counts.iloc[0]["count"] / total) if total else 0
+            p1 = (
+                f"We’ve gathered {total} responses across {unique} countries. "
+                f"{top_name} currently leads with {top_share:.0%} of the sample. "
+                f"Top countries so far: {breakdown}. Overall reach shows {diversity_tag}."
+            )
+            p2 = ""
+            if paragraphs == "2 paragraphs":
+                if context["recent_uptick"]:
+                    p2 = f"Recent momentum appears from {context['recent_uptick']}. We’ll keep tracking as new responses arrive."
+                else:
+                    p2 = "We’ll keep tracking how the mix evolves as more participants join."
+            return p1 if not p2 else p1 + "\n\n" + p2
 
-                context = ", ".join(
-                    [f"{r.country_name} ({int(r['count'])})" for _, r in counts.head(5).iterrows()]
-                )
+        # Generate with OpenAI when available
+        generate = st.button("Generate summary")
+        summary = ""
 
-                prompt = (
-                    "Write ONE short, news-style LinkedIn update (<=250 characters) about a live country survey. "
-                    "Be factual, energetic, and concise. No URLs.\n"
-                    f"Total: {total}. Top: {top_name} at {top_share:.0%}. Others: {context}.\n"
-                    f"Extras: {extras}\n"
-                    "Return ONLY the line—no bullets or numbering."
-                )
+        if generate:
+            use_openai = bool(os.getenv("OPENAI_API_KEY"))
+            if use_openai:
+                try:
+                    from openai import OpenAI
+                    client = OpenAI()
 
-                resp = client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=[{"role": "user", "content": prompt}],
-                    temperature=0.7,
-                    max_tokens=220,
-                )
-                txt = resp.choices[0].message.content.strip()
-                if not add_hashtags:
-                    # Trim long hashtag spam, keep short ones
-                    parts = [w for w in txt.split() if not (w.startswith("#") and len(w) > 15)]
-                    txt = " ".join(parts)
-                txt = (txt[:247] + "…") if len(txt) > 250 else txt
-                if txt:
-                    blurb = txt
-            except Exception as e:
-                st.warning(f"OpenAI generation failed: {e}. Using local blurb.")
+                    length_req = "one paragraph" if paragraphs == "1 paragraph" else "two short paragraphs"
+                    prompt = (
+                        "Write {length_req} (≈80–160 words total) summarizing audience origins for a LinkedIn update. "
+                        "Be factual, concise, and positive. No emojis, no hashtags, no URLs. "
+                        "Mention total responses, top countries, and overall diversity; optionally note any recent uptick.\n\n"
+                        "Facts (use as ground truth):\n"
+                        f"- Total responses: {context['total_responses']}\n"
+                        f"- Unique countries: {context['unique_countries']}\n"
+                        f"- Top countries: {context['top_breakdown']}\n"
+                        f"- Diversity: {context['diversity']}\n"
+                        f"- Recent uptick: {context['recent_uptick']}\n"
+                        f"- Tone: {tone}\n"
+                    ).format(length_req=length_req)
 
-        st.subheader("LinkedIn-ready blurb")
-        st.code(blurb, language=None)
+                    resp = client.chat.completions.create(
+                        model="gpt-4o-mini",
+                        messages=[{"role": "user", "content": prompt}],
+                        temperature=0.7,
+                        max_tokens=400,
+                    )
+                    summary = resp.choices[0].message.content.strip()
+                except Exception as e:
+                    st.warning(f"OpenAI generation failed: {e}. Showing local summary instead.")
+                    summary = local_summary()
+            else:
+                st.info("OPENAI_API_KEY not set — using local summary.")
+                summary = local_summary()
 
-        st.download_button(
-            "Download blurb (.txt)",
-            data=blurb.encode("utf-8"),
-            file_name="linkedin_blurb.txt",
-            mime="text/plain",
-            use_container_width=True,
-        )
+        # Show result
+        if summary:
+            st.subheader("Audience summary")
+            st.markdown(summary)
+            st.download_button(
+                "Download summary (.txt)",
+                data=summary.encode("utf-8"),
+                file_name="audience_summary.txt",
+                mime="text/plain",
+                use_container_width=True,
+            )
 
-        st.caption("Tip: enable OpenAI for punchier copy. Without a key, the app uses a local news-style line.")
 
 
 
