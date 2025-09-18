@@ -50,7 +50,7 @@ country_names = countries_df["name"].tolist()
 alpha3_map = dict(zip(countries_df["name"], countries_df["alpha_3"]))
 
 # ---------- UI Navigation ----------
-tab1, tab2, tab3, tab4 = st.tabs(["📝 Survey", "📄 Data", "📊 Visualizations", "🧠 Insights"])
+tab1, tab2, tab3, tab4, tab5 = st.tabs(["📝 Survey", "📄 Data", "📊 Visualizations", "🧠 Insights", "AI post"])
 
 # ---------- Survey Tab ----------
 with tab1:
@@ -274,9 +274,11 @@ with tab4:
         )
 
 # ---------- AI Copy Tab (≤250 chars) ----------
-tab5, = st.tabs(["🤖 AI Copy (≤250 chars)"])
-
 with tab5:
+    st.header(""🤖 AI Copy (≤250 chars)")
+#tab5, = st.tabs(["🤖 AI Copy (≤250 chars)"])
+
+    with tab5:
     st.header("AI-style social snippets (≤250 chars)")
     df = load_data()
 
