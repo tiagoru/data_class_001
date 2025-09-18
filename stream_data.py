@@ -9,6 +9,7 @@ import sqlite3
 import plotly.express as px
 from wordcloud import WordCloud
 import pycountry
+import os
 
 DB_PATH = os.getenv("DB_PATH", "countries.db")
 
@@ -50,7 +51,7 @@ country_names = countries_df["name"].tolist()
 alpha3_map = dict(zip(countries_df["name"], countries_df["alpha_3"]))
 
 # ---------- UI Navigation ----------
-tab1, tab2, tab3, tab4, tab5 = st.tabs(["📝 Survey", "📄 Data", "📊 Visualizations", "🧠 Insights", "AI post"])
+tab1, tab2, tab3, tab4, tab5 = st.tabs(["📝 Survey", "📄 Data", "📊 Visualizations", "🧠 Insights", "🤖 AI Copy (≤250 chars)"])
 
 # ---------- Survey Tab ----------
 with tab1:
@@ -274,8 +275,7 @@ with tab4:
         )
 
 # ---------- AI Copy Tab (≤250 chars) ----------
-# --- put near your other imports ---
-import os
+
 
 # ---------- AI Copy Tab (≤250 chars) ----------
 tab5, = st.tabs(["🤖 AI Copy (≤250 chars)"])
